@@ -624,7 +624,15 @@ def sync_profile():
 
     # sync_profile 新约定:返回 dict{name, avatar, stats}
     # 兼容旧实现:返回 2 元组 (name, avatar) 时 stats 为 []
-    result = asyncio.run(platform.sync_profile(record['filePath']))
+    try:
+        result = asyncio.run(platform.sync_profile(record['filePath']))
+    except Exception as exc:
+        # 浏览器启动失败等异常以前直接冒泡成 Flask 500「服务器内部错误」，
+        # 前端只显示笼统提示。这里返回可读原因，方便定位/重试。
+        logger.exception(f"[syncProfile] 同步资料失败: {exc}")
+        return jsonify({
+            "code": 500, "msg": f"同步资料失败：{exc}", "data": None,
+        }), 500
     if isinstance(result, dict):
         name = result.get('name', '') or ''
         avatar = result.get('avatar', '') or ''
@@ -728,6 +736,12 @@ def login():
         except asyncio.CancelledError:
             logger.info(f"[login] 用户关闭了浏览器，{platform.platform_name} 登录取消")
             status_queue.put(json.dumps({"status": "error", "msg": "用户关闭了浏览器"}))
+        except Exception as exc:
+            # 未捕获异常会让 SSE 一直挂着，前端卡在「登录中」且浏览器不弹出。
+            logger.exception(f"[login] {platform.platform_name} 登录异常: {exc}")
+            status_queue.put(json.dumps({
+                "status": "error", "msg": f"登录失败：{exc}",
+            }))
 
     thread = threading.Thread(
         target=_run_login,

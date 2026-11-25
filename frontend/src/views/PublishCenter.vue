@@ -1469,9 +1469,9 @@ function mergeConfig(common, platformDefault, platformOv, accountOv) {
     ksLocationName: accountOv?.ksLocationName ?? platformOv?.ksLocationName ?? platformDefault?.ksLocationName ?? '',
     ksLocationData: accountOv?.ksLocationData ?? platformOv?.ksLocationData ?? platformDefault?.ksLocationData ?? null,
     ksVisibility: accountOv?.ksVisibility ?? platformOv?.ksVisibility ?? platformDefault?.ksVisibility ?? '所有人可见',
-    // 互动设置三项:快手页面默认全勾选,缺省(旧草稿未存过该键)视为 true
+    // 互动设置三项:缺省(旧草稿未存过该键)按新默认;下载默认关闭
     ksAllowSameFrame: accountOv?.ksAllowSameFrame ?? platformOv?.ksAllowSameFrame ?? platformDefault?.ksAllowSameFrame ?? true,
-    ksAllowDownload: accountOv?.ksAllowDownload ?? platformOv?.ksAllowDownload ?? platformDefault?.ksAllowDownload ?? true,
+    ksAllowDownload: accountOv?.ksAllowDownload ?? platformOv?.ksAllowDownload ?? platformDefault?.ksAllowDownload ?? false,
     ksNearbyShow: accountOv?.ksNearbyShow ?? platformOv?.ksNearbyShow ?? platformDefault?.ksNearbyShow ?? true,
   }
 }
@@ -1526,28 +1526,28 @@ const landscapeCoverFrames = computed(() =>
 // 平台表单默认值（常量）。platformConfigs 是「当前视频」的活状态，
 // 切换视频时按默认值 + 快照重建（applyVideoSnapshot）。
 const DEFAULT_PLATFORM_CONFIGS = {
-  douyin: { title: '', description: '', tags: [], aiContent: '', isOriginal: false, scheduleTime: '', activityId: [], hotspotId: '', hotspotData: null, selectedTag: null, tagType: '', tagValue: '', mixId: '', mixData: null },
-  xiaohongshu: { title: '', description: '', aiContent: '', isOriginal: false, scheduleTime: '', tags: [], collectionId: '', collectionName: '', collectionData: null },
-  kuaishou: { title: '', description: '', aiContent: '', isOriginal: false, scheduleTime: '', tags: [], ksAuthorService: '', ksMiniAppLink: '', ksLocationName: '', ksLocationData: null, ksVisibility: '所有人可见', ksAllowSameFrame: true, ksAllowDownload: true, ksNearbyShow: true },
-  bilibili: { title: '', description: '', zone: '', tags: [], creationDeclaration: '', biliRepostSource: '', biliKeepSystemTags: true, isOriginal: false, scheduleTime: '', biliCollectionName: '', biliCollectionData: null, biliTopicName: '', biliTopicData: null, biliVisibility: 'public', biliCloseDanmaku: false, biliCloseComment: false, biliFeaturedComment: false, biliFansDynamic: '' },
-  channels: { title: '', description: '', isOriginal: false, scheduleTime: '', tags: [], channelsCollectionName: '', channelsCollectionData: null, channelsLocationName: '', channelsLocationData: null, channelsActivityName: '', channelsActivityData: null, channelsMarkTag: '无需标注', channelsShootDate: '', channelsShootRegion: [], channelsRepostSource: '', channelsDrama: [], channelsLinkType: '', channelsLinkArticleUrl: '', channelsRedEnvelopeUrl: '' },
-  baijiahao: { title: '', description: '', isOriginal: false, scheduleTime: '', tags: [] },
-  tiktok: { title: '', description: '', aiContent: false, isOriginal: false, scheduleTime: '', tags: [] },
-  youtube: { title: '', description: '', audience: 'not_kids', alteredContent: false, scheduleTime: '', tags: [] },
-  iqiyi: { title: '', description: '', creationDeclaration: '', riskWarning: '', enableCashActivity: false, scheduleTime: '', tags: [] },
-  tencent_video: { title: '', description: '', creationDeclaration: [], scheduleTime: '', tags: [] },
-  weibo: { title: '', description: '', videoType: '', weiboCategory: [], contentStatement: '', contentStatement2: '', contentStatement2Optional: '', tags: [], weiboCollectionName: '', weiboCollectionData: null },
-  alipay: { title: '', description: '', authorStatement: '', reprintUrl: '', compilation: '', scheduleTime: '', tags: [] },
-  toutiao: { title: '', description: '', creationDeclaration: [], enableGenerateImage: true, collection: '', extendLink: false, extendLinkUrl: '', scheduleTime: '', tags: [] },
-  zhihu: { title: '', description: '', creationDeclaration: '内容无需标注', category: '', scheduleTime: '', tags: [] },
-  csdn: { title: '', description: '', recommend: false, scheduleTime: '', tags: [] },
+  douyin: { title: '', description: '', tags: ['AI动画', '古风', '萌娃'], aiContent: '内容由AI生成', isOriginal: false, scheduleTime: '', activityId: [], hotspotId: '', hotspotData: null, selectedTag: null, tagType: '', tagValue: '', mixId: '', mixData: null },
+  xiaohongshu: { title: '', description: '', aiContent: '', isOriginal: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'], collectionId: '', collectionName: '', collectionData: null },
+  kuaishou: { title: '', description: '', aiContent: '内容为AI生成', isOriginal: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'], ksAuthorService: '', ksMiniAppLink: '', ksLocationName: '', ksLocationData: null, ksVisibility: '所有人可见', ksAllowSameFrame: true, ksAllowDownload: false, ksNearbyShow: true },
+  bilibili: { title: '', description: '', zone: '', tags: ['AI动画', '古风', '萌娃'], creationDeclaration: '', biliRepostSource: '', biliKeepSystemTags: true, isOriginal: false, scheduleTime: '', biliCollectionName: '', biliCollectionData: null, biliTopicName: '', biliTopicData: null, biliVisibility: 'public', biliCloseDanmaku: false, biliCloseComment: false, biliFeaturedComment: false, biliFansDynamic: '' },
+  channels: { title: '', description: '', isOriginal: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'], channelsCollectionName: '', channelsCollectionData: null, channelsLocationName: '', channelsLocationData: null, channelsActivityName: '', channelsActivityData: null, channelsMarkTag: '无需标注', channelsShootDate: '', channelsShootRegion: [], channelsRepostSource: '', channelsDrama: [], channelsLinkType: '', channelsLinkArticleUrl: '', channelsRedEnvelopeUrl: '' },
+  baijiahao: { title: '', description: '', isOriginal: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  tiktok: { title: '', description: '', aiContent: false, isOriginal: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  youtube: { title: '', description: '', audience: 'not_kids', alteredContent: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  iqiyi: { title: '', description: '', creationDeclaration: '', riskWarning: '', enableCashActivity: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  tencent_video: { title: '', description: '', creationDeclaration: [], scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  weibo: { title: '', description: '', videoType: '', weiboCategory: [], contentStatement: '', contentStatement2: '', contentStatement2Optional: '', tags: ['AI动画', '古风', '萌娃'], weiboCollectionName: '', weiboCollectionData: null },
+  alipay: { title: '', description: '', authorStatement: '', reprintUrl: '', compilation: '', scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  toutiao: { title: '', description: '', creationDeclaration: [], enableGenerateImage: true, collection: '', extendLink: false, extendLinkUrl: '', scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  zhihu: { title: '', description: '', creationDeclaration: '内容无需标注', category: '', scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  csdn: { title: '', description: '', recommend: false, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
   vivo: { title: '', description: '', vivoLocationName: '', vivoLocationData: null,
     vivoDistribution: false, vivoDeclaration: '', vivoPrivacy: '公开',
-    vivoDownloadPermission: '允许', scheduleTime: '', tags: [] },
-  weixin_gzh: { title: '', description: '', isOriginal: false, gzhClaimSource: '', gzhCollectionName: '', gzhCollectionData: null, scheduleTime: '', tags: [] },
-  taobao_guanghe: { title: '', description: '', guangheClaim: '', guangheLinkType: '', guangheProducts: [], guangheShops: [], scheduleTime: '', tags: [] },
-  jingmai: { title: '', description: '', jdRelatedType: '', jdProducts: [], jdNovel: '', jdNovelData: null, jdDeclaration: '', scheduleTime: '', tags: [] },
-  dayu: { title: '', description: '', creationDeclaration: '', dayuRepostUrl: '', category: '', scheduleTime: '', tags: [] },
+    vivoDownloadPermission: '允许', scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  weixin_gzh: { title: '', description: '', isOriginal: false, gzhClaimSource: '', gzhCollectionName: '', gzhCollectionData: null, scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  taobao_guanghe: { title: '', description: '', guangheClaim: '', guangheLinkType: '', guangheProducts: [], guangheShops: [], scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  jingmai: { title: '', description: '', jdRelatedType: '', jdProducts: [], jdNovel: '', jdNovelData: null, jdDeclaration: '', scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
+  dayu: { title: '', description: '', creationDeclaration: '', dayuRepostUrl: '', category: '', scheduleTime: '', tags: ['AI动画', '古风', '萌娃'] },
 }
 
 for (const p of platformList) {
@@ -1555,6 +1555,10 @@ for (const p of platformList) {
     if (typeof value === 'string' && value.includes('无需')) DEFAULT_PLATFORM_CONFIGS[p.key][key] = value
   }
 }
+
+// 平台默认配置生成后，按素材库约定覆盖声明默认值（不改平台配置文件本身）
+DEFAULT_PLATFORM_CONFIGS.douyin.aiContent = '内容由AI生成'
+DEFAULT_PLATFORM_CONFIGS.kuaishou.aiContent = '内容为AI生成'
 
 const platformConfigs = reactive(JSON.parse(JSON.stringify(DEFAULT_PLATFORM_CONFIGS)))
 
@@ -2710,47 +2714,31 @@ function pickAutoCoverFrame(frames) {
   return frames[0]
 }
 
-// 公共：等待抽帧完成 → 取「前面 1~5 秒」中最接近 3s 的帧 → save-cover 生成 4 比例封面。失败返回 null。
-// onStage?: (stage: 'extracting' | 'saving') => void — 通知调用方当前阶段，
-// 用于 CoverCard「裁剪中…」文案展示。
-async function fetchAutoCovers(materialId, onStage) {
+// 公共：直接复用上传素材时本地裁好并带边框的 4 张封面，不再重新抽帧裁剪。
+// 没有关联封面时返回 null（留空让用户手动设置），避免生成无边框封面覆盖用户素材。
+async function fetchAutoCovers(materialId) {
   if (!materialId) return null
   try {
-    onStage?.('extracting')
-    let frames = []
-    for (let attempt = 0; attempt < 15; attempt++) {
-      try {
-        const resp = await frameApi.getFrames(materialId)
-        const data = resp?.data || {}
-        frames = data.frames || []
-        if (data.status === 'done' && frames.length > 0) break
-      } catch { /* 素材探测中等，继续重试 */ }
-      await frameApi.extractFrames(materialId).catch(() => {})
-      await new Promise(r => setTimeout(r, 2500))
-    }
-    if (!frames.length) return null
-    const pick = pickAutoCoverFrame(frames)
-    if (!pick || pick.seconds === undefined || pick.seconds === null) return null
-    onStage?.('saving')
-    const resp = await http.post('/api/frames/save-cover', {
-      material_id: materialId,
-      seconds: pick.seconds,
-    })
-    const d = resp?.data
-    if (!d?.landscape_43) return null
-    // 后端按 4 个比例中心裁剪，前端分别填入对应字段（与手动裁剪结果同构）
-    const toCover = c => c ? {
-      id: c.id, name: c.original_filename, url: getFileUrl(c.stored_path),
-      stored_path: c.stored_path, size: c.file_size, type: c.mime_type,
+    const resp = await http.get(`/api/materials/${materialId}`)
+    const saved = resp?.data?.cover_data || {}
+    const toCover = c => c?.stored_path ? {
+      id: c.id,
+      name: c.name || c.original_filename,
+      url: c.url || getFileUrl(c.stored_path),
+      stored_path: c.stored_path,
+      size: c.size ?? c.file_size,
+      type: c.type ?? c.mime_type,
     } : null
-    return {
-      coverLandscape: toCover(d.landscape_43),
-      coverLandscape169: toCover(d.landscape_169),
-      coverPortrait: toCover(d.portrait_34),
-      coverPortrait916: toCover(d.portrait_916),
+    const covers = {
+      coverLandscape: toCover(saved.coverLandscape),
+      coverLandscape169: toCover(saved.coverLandscape169),
+      coverPortrait: toCover(saved.coverPortrait),
+      coverPortrait916: toCover(saved.coverPortrait916),
     }
+    if (!covers.coverLandscape && !covers.coverPortrait) return null
+    return covers
   } catch (e) {
-    console.warn('[自动封面] 生成失败（可手动设置）:', e)
+    console.warn('[自动封面] 读取素材已上传封面失败（可手动设置）:', e)
     return null
   }
 }

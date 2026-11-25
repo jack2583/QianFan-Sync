@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -7,6 +8,7 @@ import tempfile
 import threading
 import uuid
 from datetime import datetime
+from pathlib import Path
 from pathlib import Path
 
 from flask import Blueprint, request, jsonify
@@ -21,6 +23,19 @@ def _get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _decode_cover_data(value):
+    """cover_data 列存 JSON 字符串，接口返回对象。"""
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        obj = json.loads(value)
+        return obj if isinstance(obj, dict) else {}
+    except (ValueError, TypeError):
+        return {}
 
 
 def _guess_file_type(mime_type, filename=""):
@@ -93,6 +108,13 @@ def _async_extract_thumb(material_id: str, source_path: str):
         if not rel:
             return
         conn = _get_db()
+        # 已绑定自定义封面（如带边框封面）时，不再用视频抽帧覆盖
+        current = conn.execute(
+            "SELECT thumbnail_path FROM materials WHERE id = ?", (material_id,)
+        ).fetchone()
+        if current and str(current["thumbnail_path"] or "").startswith("covers/"):
+            conn.close()
+            return
         conn.execute(
             "UPDATE materials SET thumbnail_path = ? WHERE id = ?",
             (rel, material_id),
@@ -361,6 +383,95 @@ def covers_crop():
     return jsonify({"code": 200, "data": result})
 
 
+@materials_bp.route("/<material_id>/thumbnail", methods=["POST"])
+def set_thumbnail(material_id: str):
+    """把素材卡片缩略图绑定为已上传的封面（例如带装饰边框的封面）。
+
+    Body: {"stored_path": "covers/YYYY/MM/DD/xxx.jpg"}
+    封面由 /api/materials/covers/upload 上传，默认落在本地 covers/ 目录。
+    """
+    from storage import get_storage_by_type
+
+    conn = _get_db()
+    row = conn.execute("SELECT * FROM materials WHERE id = ?", (material_id,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"code": 404, "msg": "素材不存在"}), 404
+
+    data = request.get_json(force=True, silent=True) or {}
+    stored_path = str(data.get("stored_path") or "").strip()
+    if not stored_path:
+        return jsonify({"code": 400, "msg": "缺少 stored_path"}), 400
+    path_obj = Path(stored_path)
+    if path_obj.is_absolute() or ".." in path_obj.parts:
+        return jsonify({"code": 400, "msg": "stored_path 必须是相对路径"}), 400
+
+    local = get_storage_by_type("local")
+    storage = local if local.exists(stored_path) else get_storage_by_type(row["storage_type"] or "local")
+    if not storage.exists(stored_path):
+        return jsonify({"code": 400, "msg": "封面文件不存在"}), 400
+
+    conn = _get_db()
+    conn.execute(
+        "UPDATE materials SET thumbnail_path = ? WHERE id = ?",
+        (stored_path, material_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "code": 200,
+        "msg": "缩略图已更新",
+        "data": {
+            "thumbnail_path": stored_path,
+            "thumbnail_url": storage.get_url(stored_path),
+        },
+    })
+
+
+@materials_bp.route("/<material_id>/covers", methods=["POST"])
+def save_material_covers(material_id: str):
+    """保存上传时本地已裁好并带边框的 4 张封面，供发布页直接复用。
+
+    Body: {"covers": {"coverLandscape": {...}, "coverPortrait": {...}, ...}}
+    只记录路径等元数据，不重新裁剪、不复制文件。
+    """
+    conn = _get_db()
+    row = conn.execute("SELECT id FROM materials WHERE id = ?", (material_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"code": 404, "msg": "素材不存在"}), 404
+
+    data = request.get_json(force=True, silent=True) or {}
+    covers = data.get("covers")
+    if not isinstance(covers, dict) or not covers:
+        conn.close()
+        return jsonify({"code": 400, "msg": "缺少 covers 对象"}), 400
+
+    safe = {}
+    for key, cover in covers.items():
+        if not isinstance(cover, dict):
+            continue
+        stored_path = str(cover.get("stored_path") or "")
+        path_obj = Path(stored_path)
+        if not path_obj.is_absolute() and ".." not in path_obj.parts:
+            safe[key] = {
+                "id": cover.get("id"),
+                "name": cover.get("name"),
+                "stored_path": stored_path,
+                "size": cover.get("size"),
+                "type": cover.get("type"),
+            }
+
+    conn.execute(
+        "UPDATE materials SET cover_data = ? WHERE id = ?",
+        (json.dumps(safe, ensure_ascii=False), material_id),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"code": 200, "msg": "封面已关联", "data": safe})
+
+
 @materials_bp.route("/batch-delete", methods=["POST"])
 def batch_delete():
     """批量删除素材。
@@ -461,16 +572,29 @@ def list_files():
         (*params, page_size, offset),
     ).fetchall()
 
+    # 批量反查已发布素材（成功或部分成功），供素材选择弹窗显示发布状态
+    published_ids = set()
+    try:
+        for pub in conn.execute(
+            "SELECT DISTINCT video_material_id FROM publish_batches "
+            "WHERE video_material_id != '' AND status IN ('success', 'partial')"
+        ).fetchall():
+            published_ids.add(pub["video_material_id"])
+    except sqlite3.Error:
+        pass
+
     from storage import get_storage_by_type
 
     items = []
     for row in rows:
         item = dict(row)
+        item["cover_data"] = _decode_cover_data(item.get("cover_data"))
         item_storage = get_storage_by_type(item.get("storage_type", "local"))
         item["url"] = item_storage.get_url(item["stored_path"])
         item["thumbnail_url"] = (
             item_storage.get_url(item["thumbnail_path"]) if item.get("thumbnail_path") else None
         )
+        item["published"] = item["id"] in published_ids
         items.append(item)
     conn.close()
 
@@ -497,6 +621,7 @@ def get_material(material_id: str):
     if not row:
         return jsonify({"code": 404, "msg": "素材不存在"}), 404
     item = dict(row)
+    item["cover_data"] = _decode_cover_data(item.get("cover_data"))
     storage = get_storage_by_type(item.get("storage_type", "local"))
     item["url"] = storage.get_url(item["stored_path"])
     item["thumbnail_url"] = (
@@ -600,6 +725,7 @@ def probe(material_id: str):
     # 返回最新记录
     row = conn.execute("SELECT * FROM materials WHERE id = ?", (material_id,)).fetchone()
     item = dict(row)
+    item["cover_data"] = _decode_cover_data(item.get("cover_data"))
     item_storage = get_storage_by_type(item.get("storage_type", "local"))
     item["url"] = item_storage.get_url(item["stored_path"])
     item["thumbnail_url"] = (

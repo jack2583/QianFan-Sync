@@ -9,11 +9,104 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
 
 from conf import LOGIN_HEADLESS, LOCAL_CHROME_HEADLESS
 from util._logger import get_channel_logger
 
 logger = get_channel_logger("browser")
+
+# Playwright driver 与创建它的 event loop 绑定：Flask 每个 /login、发布请求
+# 都在自己的线程里 asyncio.run()（每次新建 loop），跨 loop 复用旧 driver 会
+# 在旧 loop 关闭后变成 TargetClosedError，表现为「点添加账号不弹浏览器」。
+# 这里按 loop 缓存 driver，同一 loop 内复用、不同 loop 各自新建。
+_ASYNC_PWS: dict[asyncio.AbstractEventLoop, object] = {}
+_ASYNC_PW_LOCK = threading.Lock()
+_SYNC_PW = None
+
+
+def _use_edge() -> bool:
+    """是否使用系统 Edge 代替 CloakBrowser。
+
+    - 环境变量 SAU_BROWSER=edge|cloak 可强制指定；
+    - 未指定时：本地没有 CloakBrowser 授权 key 就自动用系统 Edge，
+      有 key 则继续用隐身浏览器（用户后续配置 key 后无需改代码）。
+    """
+    override = os.environ.get("SAU_BROWSER", "").strip().lower()
+    if override in ("edge", "msedge", "system", "chrome"):
+        return True
+    if override in ("cloak", "cloakbrowser", "stealth"):
+        return False
+    try:
+        from cloakbrowser.license import resolve_license_key
+        if resolve_license_key():
+            return False
+    except Exception:
+        pass
+    return True
+
+
+async def _get_async_pw():
+    """按当前 event loop 取 Playwright driver，避免跨 loop 复用失效连接。"""
+    loop = asyncio.get_running_loop()
+    with _ASYNC_PW_LOCK:
+        pw = _ASYNC_PWS.get(loop)
+    if pw is not None:
+        return pw
+    from playwright.async_api import async_playwright
+    pw = await async_playwright().start()
+    with _ASYNC_PW_LOCK:
+        _ASYNC_PWS[loop] = pw
+    return pw
+
+
+async def _drop_async_pw():
+    """丢弃当前 loop 上已断开的 driver，下次调用会重新 start。"""
+    loop = asyncio.get_running_loop()
+    with _ASYNC_PW_LOCK:
+        pw = _ASYNC_PWS.pop(loop, None)
+    if pw is not None:
+        try:
+            await pw.stop()
+        except Exception:
+            pass
+
+
+def _is_driver_closed_error(exc: BaseException) -> bool:
+    """判断是否为 Playwright driver 连接已断开。"""
+    return (
+        type(exc).__name__ == "TargetClosedError"
+        or "has been closed" in str(exc).lower()
+    )
+
+
+async def _launch_async_with_recovery(launch_fn, what: str):
+    """driver 意外断开时重建一次再试，避免整次登录/发布直接失败。"""
+    for attempt in range(2):
+        pw = await _get_async_pw()
+        try:
+            return await launch_fn(pw)
+        except Exception as exc:
+            if attempt == 0 and _is_driver_closed_error(exc):
+                logger.warning("[浏览器] Playwright driver 已断开(%s)，重建后重试", what)
+                await _drop_async_pw()
+                continue
+            raise
+    raise RuntimeError("unreachable")
+
+
+def _get_sync_pw(force_new: bool = False):
+    global _SYNC_PW
+    if _SYNC_PW is None or force_new:
+        if _SYNC_PW is not None:
+            try:
+                _SYNC_PW.stop()
+            except Exception:
+                pass
+        from playwright.sync_api import sync_playwright
+        _SYNC_PW = sync_playwright().start()
+    return _SYNC_PW
 
 
 def _download_binary():
@@ -24,6 +117,9 @@ def _download_binary():
 
 def init():
     """Pre-download CloakBrowser binary at startup."""
+    if _use_edge():
+        logger.info("未检测到 CloakBrowser 授权，使用系统 Edge 浏览器")
+        return
     try:
         _download_binary()
         logger.info("CloakBrowser 隐匿浏览器已就绪")
@@ -55,13 +151,22 @@ async def create_browser(
     """
     if headless is None:
         headless = LOGIN_HEADLESS if login_mode else LOCAL_CHROME_HEADLESS
-    from cloakbrowser import launch_async
-    browser = await launch_async(
-        headless=headless,
-        args=["--start-maximized"],
-        humanize=humanize,
-        human_preset=human_preset,
-    )
+    if _use_edge():
+        async def _launch(pw):
+            return await pw.chromium.launch(
+                channel="msedge",
+                headless=headless,
+                args=["--start-maximized"],
+            )
+        browser = await _launch_async_with_recovery(_launch, "create_browser")
+    else:
+        from cloakbrowser import launch_async
+        browser = await launch_async(
+            headless=headless,
+            args=["--start-maximized"],
+            humanize=humanize,
+            human_preset=human_preset,
+        )
 
     if login_mode or headless is False:
         # login 或有头浏览器（发布场景）：用户主动关浏览器 → cancel 当前 task，
@@ -180,6 +285,18 @@ async def create_persistent_context(
     headless: bool = False,
 ):
     """异步入口：登录扫码用持久化 context（no_viewport，跟随窗口自适应）。"""
+    if _use_edge():
+        async def _launch(pw):
+            return await pw.chromium.launch_persistent_context(
+                user_data_dir,
+                channel="msedge",
+                headless=headless,
+                no_viewport=True,
+                args=["--window-size=1920,1080", "--start-maximized"],
+            )
+        return await _launch_async_with_recovery(
+            _launch, "create_persistent_context"
+        )
     from cloakbrowser import launch_persistent_context_async
     return await launch_persistent_context_async(
         user_data_dir,
@@ -193,6 +310,20 @@ async def create_persistent_context(
 
 def create_browser_sync(headless: bool = False):
     """同步入口：创建 stealth Chromium 浏览器。"""
+    if _use_edge():
+        for attempt in range(2):
+            pw = _get_sync_pw(force_new=(attempt > 0))
+            try:
+                return pw.chromium.launch(
+                    channel="msedge",
+                    headless=headless,
+                    args=["--start-maximized"],
+                )
+            except Exception as exc:
+                if attempt == 0 and _is_driver_closed_error(exc):
+                    logger.warning("[浏览器] 同步 Playwright driver 已断开，重建后重试")
+                    continue
+                raise
     from cloakbrowser import launch
     return launch(headless=headless)
 

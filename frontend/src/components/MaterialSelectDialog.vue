@@ -135,6 +135,12 @@
               {{ mat.storage_type === 's3' ? 'S3' : '本地' }}
             </span>
 
+            <!-- 发布状态标识 -->
+            <span class="msd-card-publish-badge" :class="{ published: mat.published }">
+              <el-icon :size="10"><component :is="mat.published ? 'CircleCheckFilled' : 'Circle'" /></el-icon>
+              {{ mat.published ? '已发布' : '未发布' }}
+            </span>
+
             <!-- Hover overlay：仅显示日期（大小已常驻在 caption） -->
             <div class="msd-card-hover-info">
               <span class="msd-card-date">{{ formatDate(mat.upload_time) }}</span>
@@ -813,6 +819,32 @@ $bg-card-hover: rgba($overlay-rgb, 0.05);
     color: #fff;
     background: rgba($info-color, 0.7);
     border-color: rgba($info-color, 0.5);
+  }
+}
+
+// 发布状态标识（左下角，与右上存储标识对称）
+.msd-card-publish-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba($overlay-rgb, 0.15);
+  border-radius: 4px;
+  color: #d1d5db;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 2;
+  letter-spacing: 0.3px;
+
+  &.published {
+    color: #fff;
+    background: rgba($success-color, 0.75);
+    border-color: rgba($success-color, 0.55);
   }
 }
 

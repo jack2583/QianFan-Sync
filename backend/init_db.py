@@ -157,6 +157,7 @@ def init_database():
         height INTEGER DEFAULT 0,
         duration REAL DEFAULT 0,
         thumbnail_path TEXT DEFAULT '',
+        cover_data TEXT DEFAULT '{}',
         orientation TEXT DEFAULT '',
         upload_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -251,6 +252,13 @@ def migrate_database():
     try:
         cursor.execute("ALTER TABLE materials ADD COLUMN orientation TEXT DEFAULT ''")
         logger.info("已添加 materials.orientation 列")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+
+    # materials 添加 cover_data 列：上传时生成的 4 张本地封面（JSON），发布页直接复用
+    try:
+        cursor.execute("ALTER TABLE materials ADD COLUMN cover_data TEXT DEFAULT '{}'")
+        logger.info("已添加 materials.cover_data 列")
     except sqlite3.OperationalError:
         pass  # 列已存在
 

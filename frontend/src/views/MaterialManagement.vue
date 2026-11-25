@@ -787,6 +787,11 @@ $danger: #ef4444;
     display: block;
     transition: transform 0.35s ease;
   }
+
+  // 视频封面是 3:4 / 4:3 的带边框图，方形卡片用 cover 会裁掉上下边框
+  img.mat-card-video-thumb {
+    object-fit: contain;
+  }
 }
 
 .mat-card-video-fallback {
