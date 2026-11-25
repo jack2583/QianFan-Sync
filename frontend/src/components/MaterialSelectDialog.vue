@@ -50,6 +50,15 @@
           <span>{{ opt.label }}</span>
         </button>
       </div>
+      <el-select
+        v-model="categoryFilter"
+        placeholder="全部分类"
+        clearable
+        class="msd-category-filter"
+        @change="onCategoryChange"
+      >
+        <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+      </el-select>
     </div>
 
     <!-- Body -->
@@ -149,6 +158,7 @@
           <!-- Caption -->
           <div class="msd-card-caption">
             <span class="msd-card-name" :title="mat.original_filename">
+              <span v-if="mat.category" class="msd-card-category-tag">{{ mat.category }}</span>
               {{ mat.original_filename }}
             </span>
             <span class="msd-card-meta">
@@ -260,6 +270,8 @@ const page = ref(1)
 const pageSize = ref(24)
 const searchKeyword = ref('')
 const typeFilter = ref('all')
+const categoryFilter = ref('')
+const categories = ref([])
 const selectedId = ref(null)
 // 多选模式：保存完整素材对象（跨页保留，确认时一次性 emit）
 const selectedMats = ref([])
@@ -297,7 +309,7 @@ const typeOptions = computed(() => {
 })
 
 const hasFilter = computed(
-  () => searchKeyword.value.trim() !== '' || typeFilter.value !== props.filterType,
+  () => searchKeyword.value.trim() !== '' || typeFilter.value !== props.filterType || categoryFilter.value !== '',
 )
 
 const selectedMat = computed(
@@ -372,12 +384,27 @@ function onPageSizeChange() {
   loadPage()
 }
 
+function onCategoryChange() {
+  page.value = 1
+  loadPage()
+}
+
+async function loadCategories() {
+  try {
+    const resp = await materialsApi.getCategories()
+    if (resp.code === 200) categories.value = resp.data || []
+  } catch (e) {
+    console.warn('加载分类失败:', e)
+  }
+}
+
 async function loadPage() {
   loading.value = true
   try {
     const resp = await materialsApi.list({
       type: typeFilter.value,
       keyword: searchKeyword.value.trim(),
+      category: categoryFilter.value,
       page: page.value,
       page_size: pageSize.value,
     })
@@ -469,6 +496,7 @@ async function confirmSelect() {
 function onClosed() {
   searchKeyword.value = ''
   typeFilter.value = props.filterType || 'all'
+  categoryFilter.value = ''
   page.value = 1
   selectedId.value = null
   selectedMats.value = []
@@ -480,9 +508,11 @@ function onClosed() {
 async function open() {
   visible.value = true
   typeFilter.value = props.filterType || 'all'
+  categoryFilter.value = ''
   page.value = 1
   selectedId.value = null
   selectedMats.value = []
+  loadCategories()
   await loadPage()
 }
 
@@ -629,6 +659,11 @@ $bg-card-hover: rgba($overlay-rgb, 0.05);
   background: $overlay-hover;
   border: 1px solid $border;
   border-radius: 12px;
+}
+
+.msd-category-filter {
+  width: 140px;
+  flex-shrink: 0;
 }
 
 .msd-search {
@@ -962,6 +997,18 @@ $bg-card-hover: rgba($overlay-rgb, 0.05);
   text-overflow: ellipsis;
   font-weight: 600;
   transition: color 0.15s ease;
+}
+
+.msd-card-category-tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba($brand-1, 0.16);
+  color: $brand-1;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
 // 常驻的元信息行：大小 / 时长 / 日期

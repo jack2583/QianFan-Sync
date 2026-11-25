@@ -429,6 +429,66 @@ def set_thumbnail(material_id: str):
     })
 
 
+@materials_bp.route("/categories", methods=["GET"])
+def get_categories():
+    """获取用户自定义素材分类列表。"""
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key = ?", ("material_categories",)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"code": 200, "data": ["AI动画", "朗读"]})
+    try:
+        cats = json.loads(row["value"])
+        if not isinstance(cats, list):
+            cats = []
+    except (ValueError, TypeError):
+        cats = []
+    return jsonify({"code": 200, "data": cats})
+
+
+@materials_bp.route("/categories", methods=["POST"])
+def save_categories():
+    """保存用户自定义素材分类列表（整体覆盖）。Body: {"categories": [...]}"""
+    data = request.get_json(force=True, silent=True) or {}
+    cats = data.get("categories")
+    if not isinstance(cats, list):
+        return jsonify({"code": 400, "msg": "categories 必须是数组"}), 400
+    clean = []
+    for c in cats:
+        name = str(c).strip()
+        if name and name not in clean:
+            clean.append(name)
+    conn = _get_db()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+        ("material_categories", json.dumps(clean, ensure_ascii=False)),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"code": 200, "msg": "分类已保存", "data": clean})
+
+
+@materials_bp.route("/<material_id>/category", methods=["POST"])
+def set_material_category(material_id: str):
+    """设置素材分类。Body: {"category": "AI动画"}，传空字符串表示清除分类。"""
+    conn = _get_db()
+    row = conn.execute("SELECT id FROM materials WHERE id = ?", (material_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"code": 404, "msg": "素材不存在"}), 404
+    data = request.get_json(force=True, silent=True) or {}
+    category = str(data.get("category") or "").strip()
+    conn.execute(
+        "UPDATE materials SET category = ? WHERE id = ?", (category, material_id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"code": 200, "msg": "分类已更新", "data": {"category": category}})
+
+
 @materials_bp.route("/<material_id>/covers", methods=["POST"])
 def save_material_covers(material_id: str):
     """保存上传时本地已裁好并带边框的 4 张封面，供发布页直接复用。
@@ -540,6 +600,7 @@ def list_files():
 
     file_type = request.args.get("type", "all")
     keyword = (request.args.get("keyword") or "").strip()
+    category = (request.args.get("category") or "").strip()
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
@@ -558,6 +619,9 @@ def list_files():
     if keyword:
         where_clauses.append("original_filename LIKE ?")
         params.append(f"%{keyword}%")
+    if category:
+        where_clauses.append("category = ?")
+        params.append(category)
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     conn = _get_db()

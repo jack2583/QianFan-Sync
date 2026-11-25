@@ -29,6 +29,15 @@
           <span>{{ opt.label }}</span>
         </button>
       </div>
+      <el-select
+        v-model="categoryFilter"
+        placeholder="全部分类"
+        clearable
+        class="category-filter"
+        @change="onCategoryChange"
+      >
+        <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+      </el-select>
       <div class="action-buttons">
         <!-- 批量操作条（选择态） -->
         <template v-if="selectMode">
@@ -45,6 +54,10 @@
         </template>
         <!-- 常规按钮 -->
         <template v-else>
+          <el-button class="btn-category" @click="openCategoryManager">
+            <el-icon><Collection /></el-icon>
+            <span>分类管理</span>
+          </el-button>
           <el-button class="btn-batch" data-tour="material-batch" @click="enterSelectMode">
             <el-icon><Select /></el-icon>
             <span>批量删除</span>
@@ -147,6 +160,16 @@
               <span class="mat-card-dot">·</span>
               <span class="mat-card-time">{{ formatDate(mat.upload_time) }}</span>
             </div>
+            <button
+              v-if="!selectMode"
+              class="mat-card-category"
+              :class="{ 'has-category': !!mat.category }"
+              :title="mat.category ? `分类：${mat.category}（点击切换）` : '点击设置分类'"
+              @click.stop="cycleCategory(mat)"
+            >
+              <el-icon :size="11"><Collection /></el-icon>
+              <span>{{ mat.category || '未分类' }}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -219,6 +242,32 @@
       </div>
     </el-dialog>
 
+    <!-- 分类管理对话框 -->
+    <el-dialog
+      v-model="categoryDialogVisible"
+      title="素材分类管理"
+      width="440px"
+      append-to-body
+    >
+      <div class="category-manager">
+        <p class="category-manager-hint">自定义分类后，可在素材管理页和发布页素材选择弹窗中按分类筛选。</p>
+        <div class="category-list">
+          <div v-for="(c, i) in categoryDraft" :key="c" class="category-row">
+            <span>{{ c }}</span>
+            <el-button size="small" text type="danger" @click="removeCategoryDraft(i)">删除</el-button>
+          </div>
+          <div v-if="categoryDraft.length === 0" class="category-empty">暂无分类</div>
+        </div>
+        <el-button class="category-add" @click="addCategoryDraft">
+          <el-icon><Plus /></el-icon><span>新增分类</span>
+        </el-button>
+      </div>
+      <template #footer>
+        <el-button @click="categoryDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveCategoryManager">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 页面新手引导（teleport 到 body，首次进入自动播放） -->
     <GuideTour ref="tourRef" :steps="materialGuideSteps" @finish="onGuideDone" @skip="onGuideDone" />
   </div>
@@ -240,6 +289,8 @@ import {
   Monitor,
   Select,
   Check,
+  Collection,
+  Plus,
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { materialsApi } from '@/api/materials'
@@ -254,6 +305,8 @@ const appStore = useAppStore()
 // 搜索/筛选/分页
 const searchKeyword = ref('')
 const typeFilter = ref('all')
+const categoryFilter = ref('')
+const categories = ref([])
 const page = ref(1)
 const pageSize = ref(24)
 const items = ref([])
@@ -268,7 +321,7 @@ const typeOptions = [
 ]
 
 const hasFilter = computed(
-  () => searchKeyword.value.trim() !== '' || typeFilter.value !== 'all',
+  () => searchKeyword.value.trim() !== '' || typeFilter.value !== 'all' || categoryFilter.value !== '',
 )
 
 // 对话框控制
@@ -311,12 +364,89 @@ function onPageSizeChange() {
   loadPage()
 }
 
+function onCategoryChange() {
+  page.value = 1
+  selectedIds.value = new Set()
+  loadPage()
+}
+
+async function loadCategories() {
+  try {
+    const resp = await materialsApi.getCategories()
+    if (resp.code === 200) categories.value = resp.data || []
+  } catch (e) {
+    console.error('加载分类失败:', e)
+  }
+}
+
+// 卡片上点击分类标签：循环切换分类（无 -> 各分类 -> 无），快速归类
+async function cycleCategory(mat) {
+  if (selectMode.value) return
+  const idx = categories.value.indexOf(mat.category || '')
+  const next = idx < 0 ? (categories.value[0] || '') : (idx + 1 >= categories.value.length ? '' : categories.value[idx + 1])
+  try {
+    const resp = await materialsApi.setCategory(mat.id, next)
+    if (resp.code === 200) {
+      mat.category = next
+      ElMessage.success(next ? `已归类：${next}` : '已清除分类')
+    }
+  } catch (e) {
+    console.error('设置分类失败:', e)
+    ElMessage.error('设置分类失败')
+  }
+}
+
+// 分类管理对话框
+const categoryDialogVisible = ref(false)
+const categoryDraft = ref([])
+function openCategoryManager() {
+  categoryDraft.value = [...categories.value]
+  categoryDialogVisible.value = true
+}
+function addCategoryDraft() {
+  ElMessageBox.prompt('输入分类名称', '新增分类', {
+    confirmButtonText: '添加',
+    cancelButtonText: '取消',
+    inputPlaceholder: '例如：AI动画',
+  }).then(({ value }) => {
+    const name = (value || '').trim()
+    if (!name) return
+    if (categoryDraft.value.includes(name)) {
+      ElMessage.warning('分类已存在')
+      return
+    }
+    categoryDraft.value.push(name)
+  }).catch(() => {})
+}
+function removeCategoryDraft(index) {
+  categoryDraft.value.splice(index, 1)
+}
+async function saveCategoryManager() {
+  try {
+    const resp = await materialsApi.saveCategories(categoryDraft.value)
+    if (resp.code === 200) {
+      categories.value = resp.data || []
+      // 若当前筛选的分类被删掉，重置筛选
+      if (categoryFilter.value && !categories.value.includes(categoryFilter.value)) {
+        categoryFilter.value = ''
+      }
+      categoryDialogVisible.value = false
+      ElMessage.success('分类已保存')
+      loadPage()
+    }
+  } catch (e) {
+    console.error('保存分类失败:', e)
+    ElMessage.error('保存分类失败')
+  }
+}
+
 async function loadPage() {
   loading.value = true
   try {
     const resp = await materialsApi.list({
       type: typeFilter.value,
       keyword: searchKeyword.value.trim(),
+      category: categoryFilter.value,
       page: page.value,
       page_size: pageSize.value,
     })
@@ -540,6 +670,7 @@ function startGuide() {
 const onGuideDone = () => markGuideDone(GUIDE_KEYS.material)
 
 onMounted(() => {
+  loadCategories()
   loadPage()
   // 首次进入自动播放（稍等页面渲染稳定再启动，定位更准）
   if (!isGuideDone(GUIDE_KEYS.material)) {
@@ -625,6 +756,11 @@ $danger: #ef4444;
   background: $bg-base;
   border: 1px solid $border;
   border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.category-filter {
+  width: 140px;
   flex-shrink: 0;
 }
 
@@ -757,6 +893,7 @@ $danger: #ef4444;
   margin-right: 4px;
   white-space: nowrap;
 }
+.btn-category,
 .btn-batch,
 .btn-select-all,
 .btn-cancel-select {
@@ -949,6 +1086,66 @@ $danger: #ef4444;
 
 .mat-card-dot {
   opacity: 0.6;
+}
+
+.mat-card-category {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border: 1px solid $border;
+  border-radius: 4px;
+  background: rgba($overlay-rgb, 0.04);
+  color: $text-3;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  &:hover {
+    border-color: rgba($brand-1, 0.4);
+    color: $brand-1;
+  }
+  &.has-category {
+    color: $brand-1;
+    background: rgba($brand-1, 0.1);
+    border-color: rgba($brand-1, 0.3);
+  }
+}
+
+// ========== 分类管理对话框 ==========
+.category-manager-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: $text-3;
+  line-height: 1.5;
+}
+.category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.category-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border: 1px solid $border;
+  border-radius: 6px;
+  background: $bg-base;
+  font-size: 13px;
+  color: $text-1;
+}
+.category-empty {
+  padding: 18px;
+  text-align: center;
+  color: $text-3;
+  font-size: 12px;
+}
+.category-add {
+  margin-top: 10px;
+  width: 100%;
 }
 
 // ========== Empty ==========

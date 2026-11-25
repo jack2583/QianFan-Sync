@@ -159,6 +159,7 @@ def init_database():
         thumbnail_path TEXT DEFAULT '',
         cover_data TEXT DEFAULT '{}',
         orientation TEXT DEFAULT '',
+        category TEXT DEFAULT '',
         upload_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -261,6 +262,25 @@ def migrate_database():
         logger.info("已添加 materials.cover_data 列")
     except sqlite3.OperationalError:
         pass  # 列已存在
+
+    # materials 添加 category 列：用户自定义分类
+    try:
+        cursor.execute("ALTER TABLE materials ADD COLUMN category TEXT DEFAULT ''")
+        logger.info("已添加 materials.category 列")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+
+    # 初始化默认素材分类（仅首次）
+    try:
+        row = cursor.execute("SELECT value FROM settings WHERE key = ?", ("material_categories",)).fetchone()
+        if not row:
+            cursor.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?)",
+                ("material_categories", json.dumps(["AI动画", "朗读"], ensure_ascii=False)),
+            )
+            logger.info("已初始化默认素材分类")
+    except sqlite3.OperationalError:
+        pass
 
     # 草稿批量发布用：溯源到草稿
     try:

@@ -26,6 +26,21 @@ export const materialsApi = {
     return http.get('/api/materials/list', params)
   },
 
+  /** 获取用户自定义分类列表 */
+  getCategories() {
+    return http.get('/api/materials/categories')
+  },
+
+  /** 保存分类列表（整体覆盖） */
+  saveCategories(categories) {
+    return http.post('/api/materials/categories', { categories })
+  },
+
+  /** 设置素材分类（空字符串=清除） */
+  setCategory(id, category) {
+    return http.post(`/api/materials/${id}/category`, { category })
+  },
+
   /** 删除素材 */
   delete(id) {
     return http.delete(`/api/materials/${id}`)
