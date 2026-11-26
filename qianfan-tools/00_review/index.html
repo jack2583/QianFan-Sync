@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>千帆素材库 · 离线校对</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; margin: 0; background: #f6f7fb; color: #222; }
+  header { background: #fff; border-bottom: 1px solid #e3e5ec; padding: 16px 24px; position: sticky; top: 0; z-index: 2; }
+  h1 { margin: 0 0 6px; font-size: 20px; }
+  .hint { color: #666; font-size: 13px; line-height: 1.7; }
+  button { background: #2d6cdf; color: #fff; border: 0; border-radius: 6px; padding: 9px 16px; font-size: 14px; cursor: pointer; }
+  .wrap { padding: 20px 24px 60px; max-width: 1400px; margin: 0 auto; }
+  .card { background: #fff; border: 1px solid #e3e5ec; border-radius: 10px; padding: 16px; margin-bottom: 18px; }
+  .card h2 { font-size: 16px; margin: 0 0 10px; }
+  .badge { display: inline-block; background: #fff2cc; color: #9a6700; border-radius: 4px; padding: 2px 8px; font-size: 12px; margin-left: 8px; }
+  .media { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  video { width: 100%; max-height: 320px; background: #000; border-radius: 6px; }
+  .covers { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .covers figure { margin: 0; }
+  .covers img { width: 100%; display: block; border-radius: 4px; border: 1px solid #ddd; }
+  .covers figcaption { font-size: 11px; color: #888; text-align: center; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+  label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+  textarea { width: 100%; box-sizing: border-box; border: 1px solid #d5d8e0; border-radius: 5px; padding: 7px; font-size: 13px; font-family: inherit; resize: vertical; }
+  textarea.short { height: 34px; }
+  textarea.mid { height: 70px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>千帆素材库 · 离线校对</h1>
+  <div class="hint">
+    校对标题/标签/描述后点「下载 edits.csv」，把文件保存到 <b>00_review\edits.csv</b>，
+    再到命令行运行 <b>run.bat review --apply</b>（或 python review_batch.py --apply）写回。
+    __CLEAR__ 表示清空该字段。重抽封面：python review_batch.py --cover ID --time 00:00:05
+  </div>
+  <p><button onclick="downloadEdits()">下载 edits.csv</button></p>
+</header>
+<div class="wrap" id="cards"></div>
+<script>
+const ITEMS = [];
+const BASE = "file:///E:/%E5%8D%83%E5%B8%86%E7%B4%A0%E6%9D%90%E5%BA%93/01_inbox/";
+function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'})[c]); }
+function ta(id, field, value, cls) {
+  return `<div><label>${field}</label><textarea class="${cls}" data-id="${id}" data-field="${field}">${esc(value)}</textarea></div>`;
+}
+function render() {
+  const box = document.getElementById('cards');
+  box.innerHTML = ITEMS.map(it => {
+    const base = BASE + it.id + '/';
+    const covers = it.covers.map(c =>
+      `<figure><img src="${base}${c.file}" alt="${c.file}"><figcaption>${c.ratio}</figcaption></figure>`
+    ).join('');
+    const badge = it.need_title ? '<span class="badge">需补标题</span>' : '';
+    return `<div class="card">
+      <h2>${esc(it.id)} · ${esc(it.title)}${badge}</h2>
+      <div class="media">
+        <video controls preload="metadata" src="${base}video.mp4"></video>
+        <div class="covers">${covers}</div>
+      </div>
+      <div class="fields">
+        ${ta(it.id, 'title', it.title, 'short')}
+        ${ta(it.id, 'tags', it.tags.join('\n'), 'mid')}
+        ${ta(it.id, 'description', it.description, 'mid')}
+        ${ta(it.id, 'activities', it.activities.join('\n'), 'short')}
+        ${ta(it.id, 'hotspot', it.hotspot, 'short')}
+        ${ta(it.id, 'declaration', it.declaration, 'short')}
+      </div>
+    </div>`;
+  }).join('');
+}
+function quoteCell(v) {
+  const s = String(v ?? '');
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function downloadEdits() {
+  const fields = ['id','title','description','tags','activities','hotspot','declaration'];
+  const lines = [fields.join(',')];
+  ITEMS.forEach(it => {
+    const get = f => {
+      const el = document.querySelector(`textarea[data-id="${it.id}"][data-field="${f}"]`);
+      let v = el ? el.value : '';
+      if (f === 'tags' || f === 'activities') v = v.split(/\n/).map(x => x.trim()).filter(Boolean).join('|');
+      return quoteCell(v);
+    };
+    lines.push(fields.map(get).join(','));
+  });
+  const blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'edits.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+render();
+</script>
+</body>
+</html>

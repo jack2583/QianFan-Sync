@@ -49,6 +49,7 @@ frontend.log
 mcp.logdependency/
 dependency*
 /QianFan*/
+!/qianfan-tools/
 *.log
 AGENTS.md
 

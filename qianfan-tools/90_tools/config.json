@@ -1,0 +1,9 @@
+{
+  "lib_root": "E:\\千帆素材库",
+  "base_url": "http://localhost:5409",
+  "create_draft": true,
+  "platforms": ["douyin"],
+  "timeout_seconds": 180,
+  "chunk_size_mb": 1,
+  "move_after_upload": true
+}
