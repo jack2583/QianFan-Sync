@@ -85,10 +85,13 @@ export const batchPublishApi = {
   // videos: 发布页每个视频的完整 draft_data 快照数组
   // intervalMinutes: 本次批量发布视频间隔（分钟），仅本次批量生效；
   //                 缺省/NaN/负数视为 0（= 立即发布下一个）。后端写 task.batch_interval_minutes。
-  batchPublishVideos(videos, intervalMinutes = 0) {
-    return http.post('/api/v2/videos/batch-publish', {
+  batchPublishVideos(videos, intervalMinutes = 0, autoSchedule = null) {
+    const body = {
       videos,
       interval_minutes: Math.max(0, Number(intervalMinutes) || 0),
-    })
+    }
+    // 自动定时参数：仅用于后端记录/追溯，发布时刻已由前端写入各账号 scheduleTime
+    if (autoSchedule && autoSchedule.enabled) body.auto_schedule = autoSchedule
+    return http.post('/api/v2/videos/batch-publish', body)
   },
 }

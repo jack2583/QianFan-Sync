@@ -122,7 +122,7 @@
         <div v-if="filteredRows.length === 0" class="empty">该分类下没有视频</div>
       </div>
 
-      <!-- ── 发布间隔：紧凑一行 ── -->
+      <!-- ── 操作间隔：始终显示，默认 30 分钟，避免连续操作触发平台风控 ── -->
       <div class="interval-row" data-tour="vbc-interval">
         <el-icon class="interval-icon"><Timer /></el-icon>
         <span class="interval-label">发布间隔</span>
@@ -137,11 +137,72 @@
         <span class="interval-unit">分钟</span>
         <el-tooltip placement="top">
           <template #content>
-            每发布完一个视频等待指定分钟数再发布下一个，避免平台风控。<br />
-            填 0 表示立即发布下一个。仅对本次批量生效。
+            每操作完一个视频等待指定分钟数再操作下一个，避免连续操作触发平台风控。<br />
+            默认 30 分钟。此间隔控制浏览器自动化操作节奏，与下方自动定时的平台定时时刻互不影响。<br />
+            填 0 表示立即操作下一个（不推荐，易触发风控）。仅对本次批量生效。
           </template>
           <el-icon class="interval-help"><QuestionFilled /></el-icon>
         </el-tooltip>
+      </div>
+
+      <!-- ── 自动定时 ── -->
+      <div class="autosched-box" data-tour="vbc-autoschedule">
+        <div class="autosched-head">
+          <el-switch v-model="autoEnabled" />
+          <span class="autosched-title">自动定时</span>
+          <el-tooltip placement="top">
+            <template #content>
+              按起始时间与间隔，自动算出每个「视频 × 平台」的定时发布时间并填入各平台。<br />
+              上方的「发布间隔」仍照常生效（控制操作节奏、避免连续操作触发风控），与平台定时时刻互不影响。
+            </template>
+            <el-icon class="autosched-help"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </div>
+
+        <template v-if="autoEnabled">
+          <div class="autosched-params">
+            <div class="aparam">
+              <span class="aparam-label">起始发布时间</span>
+              <el-date-picker
+                v-model="startAt"
+                type="datetime"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                format="YYYY-MM-DD HH:mm:ss"
+                placeholder="选择时间"
+                :disabled-date="scheduleDisabledDate"
+                :disabled-hours="scheduleDisabledHours"
+                :clearable="false"
+                style="width: 210px"
+              />
+            </div>
+            <div class="aparam">
+              <span class="aparam-label">不同视频间隔</span>
+              <el-input-number v-model="videoInterval" :min="1" :max="1440" :step="1" controls-position="right" style="width: 110px" />
+              <span class="aparam-unit">分钟</span>
+            </div>
+            <div class="aparam">
+              <span class="aparam-label">同视频不同平台间隔</span>
+              <el-input-number v-model="platformInterval" :min="1" :max="240" :step="1" controls-position="right" style="width: 110px" />
+              <span class="aparam-unit">分钟</span>
+            </div>
+          </div>
+
+          <!-- 校验错误：禁止提交并逐条提示 -->
+          <div v-if="autoPlan && autoPlan.errors.length > 0" class="autosched-errors">
+            <div class="aserr-head">排程不通过，请调整参数后重试（共 {{ autoPlan.errors.length }} 处）：</div>
+            <div v-for="(e, i) in autoPlan.errors.slice(0, 8)" :key="i" class="aserr-line">
+              视频{{ e.videoOrder + 1 }} · {{ e.platformName }}({{ e.accountName }}) {{ e.timeStr }} — {{ e.reason }}
+            </div>
+            <div v-if="autoPlan.errors.length > 8" class="aserr-more">……还有 {{ autoPlan.errors.length - 8 }} 处</div>
+          </div>
+
+          <!-- 排程预览（前 8 条） -->
+          <div v-else-if="autoPlan && autoPlan.preview.length > 0" class="autosched-preview">
+            <div class="asprev-head">排程预览（前 {{ autoPlan.preview.length }} 条，共 {{ autoPlan.assignments.length }} 个任务）</div>
+            <div v-for="(line, i) in autoPlan.preview" :key="i" class="asprev-line">{{ line }}</div>
+            <div v-if="autoPlan.assignments.length > autoPlan.preview.length" class="asprev-more">……其余 {{ autoPlan.assignments.length - autoPlan.preview.length }} 条</div>
+          </div>
+        </template>
       </div>
     </template>
 
@@ -161,7 +222,7 @@
           <el-button
             type="primary"
             data-tour="vbc-submit"
-            :disabled="selectedIndexes.length === 0"
+            :disabled="selectedIndexes.length === 0 || scheduleInvalid"
             :loading="submitting"
             @click="onConfirm"
           >
@@ -184,6 +245,10 @@ import { ref, computed, watch } from 'vue'
 import { VideoCameraFilled, CircleCheckFilled, CircleCloseFilled, Timer, QuestionFilled } from '@element-plus/icons-vue'
 import GuideTour from '@/components/GuideTour.vue'
 import { videoConfirmGuideSteps } from '@/config/guides'
+import {
+  computeAutoSchedule,
+  defaultStartAt,
+} from '@/utils/autoSchedule'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -202,6 +267,38 @@ const filter = ref('all')
 // 仅本次批量生效，不影响 settings.batchTaskInterval 全局值。
 // 默认 30 分钟：避免平台风控（用户反馈：默认 0 太隐蔽，容易忘记设置）。
 const intervalMinutes = ref(30)
+
+// ── 自动定时 ──
+const autoEnabled = ref(false)
+const startAt = ref(defaultStartAt())
+const videoInterval = ref(60)
+const platformInterval = ref(15)
+
+// rows 由父组件构造，每项含 accounts: [{id, platformKey, platformName, accountName}]
+const autoPlan = computed(() => {
+  if (!autoEnabled.value) return null
+  return computeAutoSchedule({
+    rows: props.rows,
+    selectedIndexes: selectedIndexes.value,
+    startAt: startAt.value,
+    videoInterval: videoInterval.value,
+    platformInterval: platformInterval.value,
+  })
+})
+const scheduleInvalid = computed(() => !!autoPlan.value && autoPlan.value.errors.length > 0)
+
+// 起始时间选择器：禁止选今天之前 / 超过 14 天；当天禁止选 06:00 前与 22:00 后的小时
+function scheduleDisabledDate(date) {
+  if (!date) return false
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const max = new Date(startOfToday)
+  max.setDate(max.getDate() + 14)
+  return date < startOfToday || date > max
+}
+function scheduleDisabledHours() {
+  return Array.from({ length: 24 }, (_, h) => h).filter((h) => h < 6 || h > 22)
+}
 
 const okCount = computed(() => props.rows.filter((r) => r.errors.length === 0).length)
 const failedCount = computed(() => props.rows.length - okCount.value)
@@ -263,11 +360,23 @@ function errAccounts(e) { return typeof e === 'string' ? [] : (e.accounts || [])
 
 function onConfirm() {
   if (selectedIndexes.value.length === 0) return
+  // 自动定时排程校验不通过 → 禁止提交
+  if (autoEnabled.value && scheduleInvalid.value) return
   // 父组件读取数值并传给后端（仅本次批量生效）。
   // el-input-number 已限制 min=0，组件无需重复校验。
   emit('confirm', {
     selectedIndexes: [...selectedIndexes.value],
+    // 发布间隔（操作间隔）始终生效，默认 30 分钟，避免连续操作触发平台风控。
+    // 自动定时只决定平台网页的定时时刻，不替代操作间隔。
     intervalMinutes: Number(intervalMinutes.value) || 0,
+    autoSchedule: autoEnabled.value && autoPlan.value
+      ? {
+        enabled: true,
+        start_at: startAt.value,
+        video_interval_minutes: Number(videoInterval.value) || 0,
+        platform_interval_minutes: Number(platformInterval.value) || 0,
+      }
+      : null,
   })
 }
 </script>
@@ -573,6 +682,75 @@ function onConfirm() {
 
     &:hover { color: $text-secondary; }
   }
+}
+
+// ── 自动定时 ──
+.autosched-box {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba($brand-start, 0.05);
+  border: 1px solid rgba($brand-start, 0.22);
+  border-radius: 8px;
+
+  .autosched-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .autosched-title { font-size: 13px; font-weight: 500; color: $text-primary; }
+
+  .autosched-help {
+    color: $text-muted;
+    cursor: help;
+    &:hover { color: $text-secondary; }
+  }
+}
+
+.autosched-params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+  margin-top: 12px;
+
+  .aparam {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .aparam-label { font-size: 13px; color: $text-secondary; }
+  .aparam-unit { font-size: 13px; color: $text-secondary; }
+}
+
+.autosched-preview,
+.autosched-errors {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.8;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.autosched-preview {
+  background: $bg-surface;
+  border: 1px solid $border;
+
+  .asprev-head { font-weight: 600; color: $text-primary; margin-bottom: 4px; }
+  .asprev-line { color: $text-secondary; font-variant-numeric: tabular-nums; }
+  .asprev-more { color: $text-muted; margin-top: 2px; }
+}
+
+.autosched-errors {
+  background: rgba($danger-color, 0.06);
+  border: 1px solid rgba($danger-color, 0.25);
+
+  .aserr-head { font-weight: 600; color: $danger-color; margin-bottom: 4px; }
+  .aserr-line { color: $text-secondary; font-variant-numeric: tabular-nums; }
+  .aserr-more { color: $text-muted; margin-top: 2px; }
 }
 
 // ── 底部 ──

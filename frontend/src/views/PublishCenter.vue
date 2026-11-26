@@ -1101,6 +1101,7 @@ import { accountApi } from '@/api/account'
 import { platformList, getPlatformByKey, platformKeyToId, platformNameToKey } from '@/config/platforms'
 import { validateVideoForPlatform, validateTitleForPlatform, validateDescForPlatform, countCharsWithEmoji } from '@/config/videoLimits'
 import { publishGuideSteps, GUIDE_KEYS, isGuideDone, markGuideDone } from '@/config/guides'
+import { computeAutoSchedule } from '@/utils/autoSchedule'
 
 import AccountSidebar from '@/components/AccountSidebar.vue'
 import AccountSelectDialog from '@/components/AccountSelectDialog.vue'
@@ -3491,11 +3492,25 @@ async function startBatchPublish() {
   }
   syncCurrentIntoQueue()
 
-  const rows = videoQueue.value.map((snap, i) => ({
-    index: i,
-    ..._videoDisplayInfo(snap),
-    errors: collectVideoErrors(snap),
-  }))
+  const rows = videoQueue.value.map((snap, i) => {
+    // 账号明细：供自动定时的排程预览与平台约束校验使用（id / 平台 key / 平台名 / 账号名）
+    const accounts = (snap.publishAccountIds || []).map((aid) => {
+      const acc = accountStore.accounts.find((a) => String(a.id) === String(aid))
+      const platformName = acc?.platform || ''
+      return {
+        id: aid,
+        platformKey: platformName ? (platformNameToKey[platformName] || '') : '',
+        platformName,
+        accountName: acc?.name || String(aid),
+      }
+    })
+    return {
+      index: i,
+      ..._videoDisplayInfo(snap),
+      accounts,
+      errors: collectVideoErrors(snap),
+    }
+  })
   const validRows = rows.filter(r => r.errors.length === 0)
 
   if (validRows.length === 0) {
@@ -3527,19 +3542,58 @@ async function startBatchPublish() {
 
 // 确认弹窗回调：提交勾选视频 → 移出队列 → 结果反馈
 async function confirmBatchPublish(payload) {
-  // 新格式：{ selectedIndexes, intervalMinutes }；兼容旧版直接传数组（防御性）
+  // 新格式：{ selectedIndexes, intervalMinutes, autoSchedule }；兼容旧版直接传数组（防御性）
   const selectedIndexes = Array.isArray(payload)
     ? payload
     : (payload?.selectedIndexes || [])
   const intervalMinutes = Array.isArray(payload)
     ? 0
     : Math.max(0, Number(payload?.intervalMinutes) || 0)
+  const autoSchedule = Array.isArray(payload) ? null : (payload?.autoSchedule || null)
   if (!selectedIndexes || selectedIndexes.length === 0) return
   batchSubmitting.value = true
   try {
     const sorted = [...selectedIndexes].sort((a, b) => a - b)
-    const videos = sorted.map(i => videoQueue.value[i])
-    const resp = await batchPublishApi.batchPublishVideos(videos, intervalMinutes)
+    let videos = sorted.map(i => videoQueue.value[i])
+
+    // 自动定时：按公式计算每个「视频 × 平台」的时刻，写入各视频快照的
+    // accountOverrides[accountId].scheduleTime（覆盖原值）。
+    // intervalMinutes（操作间隔）照常传给后端，默认 30 分钟，避免连续操作触发风控。
+    if (autoSchedule?.enabled) {
+      const rows = batchConfirmRows.value
+      const plan = computeAutoSchedule({
+        rows,
+        selectedIndexes: sorted,
+        startAt: autoSchedule.start_at,
+        videoInterval: autoSchedule.video_interval_minutes,
+        platformInterval: autoSchedule.platform_interval_minutes,
+      })
+      // 二次校验：不通过则拒绝提交（弹窗侧已拦截，这里是防御性兜底）
+      if (plan.errors.length > 0) {
+        ElMessage.error(`排程校验不通过：${plan.errors[0].reason}`)
+        return
+      }
+      // assignments 的 rowIndex 是 videoQueue 下标 → 需映射回 videos 数组下标
+      const rowToVideoPos = new Map(sorted.map((rowIndex, pos) => [rowIndex, pos]))
+      const byRow = new Map()
+      for (const a of plan.assignments) {
+        const pos = rowToVideoPos.get(a.rowIndex)
+        if (pos === undefined) continue
+        if (!byRow.has(pos)) byRow.set(pos, {})
+        byRow.get(pos)[a.accountId] = a.timeStr
+      }
+      videos = videos.map((v, pos) => {
+        const map = byRow.get(pos)
+        if (!map) return v
+        const accountOverrides = { ...(v.accountOverrides || {}) }
+        for (const [accountId, timeStr] of Object.entries(map)) {
+          accountOverrides[accountId] = { ...(accountOverrides[accountId] || {}), scheduleTime: timeStr }
+        }
+        return { ...v, accountOverrides }
+      })
+    }
+
+    const resp = await batchPublishApi.batchPublishVideos(videos, intervalMinutes, autoSchedule)
     const data = resp?.data || resp || {}
     const taskIds = data.task_ids || []
     const failed = data.failed || []

@@ -1719,6 +1719,17 @@ def videos_batch_publish():
     except (TypeError, ValueError):
         batch_interval_minutes = 0.0
 
+    # 自动定时：前端已把计算出的时刻写入每个账号的 scheduleTime，
+    # 这里仅记录参数用于追溯/日志；发布时刻由平台网页定时承担，不参与队列排程。
+    auto_schedule = data.get('auto_schedule') or {}
+    auto_schedule_enabled = bool(auto_schedule.get('enabled'))
+    if auto_schedule_enabled:
+        print(
+            f"[videos/batch-publish] 自动定时: start_at={auto_schedule.get('start_at')} "
+            f"video_interval={auto_schedule.get('video_interval_minutes')} "
+            f"platform_interval={auto_schedule.get('platform_interval_minutes')}"
+        )
+
     from app import PLATFORM_ID_TO_KEY, PLATFORM_MAP
     KEY_TO_PLATFORM_ID = {v: k for k, v in PLATFORM_ID_TO_KEY.items()}
 
