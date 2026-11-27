@@ -19,6 +19,8 @@ export const materialsApi = {
    * @param {Object} params
    * @param {'all'|'video'|'image'} [params.type]
    * @param {string} [params.keyword]
+   * @param {string} [params.category]
+   * @param {'all'|'published'|'unpublished'} [params.publish_status]
    * @param {number} [params.page=1]
    * @param {number} [params.page_size=24]
    */
@@ -31,9 +33,13 @@ export const materialsApi = {
     return http.get('/api/materials/categories')
   },
 
-  /** 保存分类列表（整体覆盖） */
-  saveCategories(categories) {
-    return http.post('/api/materials/categories', { categories })
+  /**
+   * 保存分类列表，并可携带重命名映射（后端同事务同步素材分类）
+   * @param {string[]} categories 最终分类名单
+   * @param {{old:string, new:string}[]} [renames] 重命名映射
+   */
+  saveCategories(categories, renames = []) {
+    return http.post('/api/materials/categories', { categories, renames })
   },
 
   /** 设置素材分类（空字符串=清除） */

@@ -50,6 +50,17 @@
           <span>{{ opt.label }}</span>
         </button>
       </div>
+      <!-- 发布状态筛选：仅视频模式有意义（图片素材暂无发布状态数据） -->
+      <div v-if="filterType === 'video'" class="msd-type-filter" data-tour="msd-publish-filter">
+        <button
+          v-for="opt in publishOptions"
+          :key="opt.value"
+          :class="['msd-type-btn', { active: publishFilter === opt.value }]"
+          @click="onPublishChange(opt.value)"
+        >
+          <span>{{ opt.label }}</span>
+        </button>
+      </div>
       <el-select
         v-model="categoryFilter"
         placeholder="全部分类"
@@ -270,6 +281,12 @@ const page = ref(1)
 const pageSize = ref(24)
 const searchKeyword = ref('')
 const typeFilter = ref('all')
+const publishFilter = ref('all')
+const publishOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'published', label: '已发布' },
+  { value: 'unpublished', label: '未发布' },
+]
 const categoryFilter = ref('')
 const categories = ref([])
 const selectedId = ref(null)
@@ -309,7 +326,8 @@ const typeOptions = computed(() => {
 })
 
 const hasFilter = computed(
-  () => searchKeyword.value.trim() !== '' || typeFilter.value !== props.filterType || categoryFilter.value !== '',
+  () => searchKeyword.value.trim() !== '' || typeFilter.value !== props.filterType
+    || categoryFilter.value !== '' || publishFilter.value !== 'all',
 )
 
 const selectedMat = computed(
@@ -384,6 +402,12 @@ function onPageSizeChange() {
   loadPage()
 }
 
+function onPublishChange(value) {
+  publishFilter.value = value
+  page.value = 1
+  loadPage()
+}
+
 function onCategoryChange() {
   page.value = 1
   loadPage()
@@ -405,6 +429,7 @@ async function loadPage() {
       type: typeFilter.value,
       keyword: searchKeyword.value.trim(),
       category: categoryFilter.value,
+      publish_status: publishFilter.value,
       page: page.value,
       page_size: pageSize.value,
     })
@@ -496,6 +521,7 @@ async function confirmSelect() {
 function onClosed() {
   searchKeyword.value = ''
   typeFilter.value = props.filterType || 'all'
+  publishFilter.value = 'all'
   categoryFilter.value = ''
   page.value = 1
   selectedId.value = null
@@ -508,6 +534,7 @@ function onClosed() {
 async function open() {
   visible.value = true
   typeFilter.value = props.filterType || 'all'
+  publishFilter.value = 'all'
   categoryFilter.value = ''
   page.value = 1
   selectedId.value = null

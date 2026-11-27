@@ -450,7 +450,15 @@ def get_categories():
 
 @materials_bp.route("/categories", methods=["POST"])
 def save_categories():
-    """保存用户自定义素材分类列表（整体覆盖）。Body: {"categories": [...]}"""
+    """保存分类列表，并在同一事务内同步素材上的分类值。
+
+    Body: {
+      "categories": [...],                       # 最终分类名单
+      "renames": [{"old": "A", "new": "B"}]      # 可选，重命名映射
+    }
+    分类名单存 settings，素材分类存 materials.category，靠字符串关联。
+    重命名/删除若不同步素材，素材会显示一个已不存在的分类名且无法被筛选。
+    """
     data = request.get_json(force=True, silent=True) or {}
     cats = data.get("categories")
     if not isinstance(cats, list):
@@ -460,15 +468,55 @@ def save_categories():
         name = str(c).strip()
         if name and name not in clean:
             clean.append(name)
+
+    raw_renames = data.get("renames") or []
+    if not isinstance(raw_renames, list):
+        return jsonify({"code": 400, "msg": "renames 必须是数组"}), 400
+    renames = []
+    for r in raw_renames:
+        if not isinstance(r, dict):
+            continue
+        old = str(r.get("old") or "").strip()
+        new = str(r.get("new") or "").strip()
+        if old and new and old != new:
+            renames.append((old, new))
+
     conn = _get_db()
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
-        ("material_categories", json.dumps(clean, ensure_ascii=False)),
-    )
-    conn.commit()
+    try:
+        synced = 0
+        # 1) 重命名：把素材上旧分类值改为新值
+        for old, new in renames:
+            cur = conn.execute(
+                "UPDATE materials SET category = ? WHERE category = ?", (new, old)
+            )
+            synced += cur.rowcount or 0
+        # 2) 清理：素材上已不在最终名单里的分类值（删除分类或历史孤立值）
+        if clean:
+            marks = ",".join("?" for _ in clean)
+            cur = conn.execute(
+                f"UPDATE materials SET category = '' "
+                f"WHERE category != '' AND category NOT IN ({marks})",
+                clean,
+            )
+        else:
+            cur = conn.execute("UPDATE materials SET category = '' WHERE category != ''")
+        cleared = cur.rowcount or 0
+        # 3) 写回名单
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+            ("material_categories", json.dumps(clean, ensure_ascii=False)),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
     conn.close()
-    return jsonify({"code": 200, "msg": "分类已保存", "data": clean})
+    return jsonify({
+        "code": 200, "msg": "分类已保存",
+        "data": clean, "synced": synced, "cleared": cleared,
+    })
 
 
 @materials_bp.route("/<material_id>/category", methods=["POST"])
@@ -593,6 +641,8 @@ def list_files():
     Query params:
       - type: all | video | image (默认 all)
       - keyword: 文件名模糊搜索
+      - category: 用户自定义分类
+      - publish_status: all | published | unpublished (默认 all)
       - page: 页码（从 1 开始）
       - page_size: 每页数量（默认 24，上限 96）
     """
@@ -601,6 +651,7 @@ def list_files():
     file_type = request.args.get("type", "all")
     keyword = (request.args.get("keyword") or "").strip()
     category = (request.args.get("category") or "").strip()
+    publish_status = (request.args.get("publish_status") or "all").strip()
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
@@ -622,6 +673,18 @@ def list_files():
     if category:
         where_clauses.append("category = ?")
         params.append(category)
+    # 发布状态：口径与下方 published 徽章一致——存在 success/partial 的发布批次即视为已发布。
+    # 用 EXISTS 子查询而非 IN，避免 video_material_id 为空串/NULL 时 NOT IN 结果集为空。
+    if publish_status in ("published", "unpublished"):
+        subquery = (
+            "SELECT 1 FROM publish_batches pb "
+            "WHERE pb.video_material_id = materials.id "
+            "AND pb.video_material_id != '' "
+            "AND pb.status IN ('success', 'partial')"
+        )
+        where_clauses.append(
+            f"EXISTS ({subquery})" if publish_status == "published" else f"NOT EXISTS ({subquery})"
+        )
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     conn = _get_db()

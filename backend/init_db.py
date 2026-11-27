@@ -298,6 +298,12 @@ def migrate_database():
         logger.info("已创建 idx_publish_batches_draft 索引")
     except sqlite3.OperationalError:
         pass  # 索引已存在
+    # 素材列表按发布状态筛选：EXISTS 子查询按 video_material_id 反查发布批次
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pb_material ON publish_batches(video_material_id)")
+        logger.info("已创建 idx_pb_material 索引")
+    except sqlite3.OperationalError:
+        pass  # 索引已存在
 
     # 发布链调度：发布页批量发布时视频间隔用（DB 驱动的定时调度）
     # scheduled_at = 该视频预定开始发布的时间（ISO，空 = 不等待/立即）

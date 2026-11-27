@@ -226,6 +226,24 @@ def request_json(method: str, endpoint: str, payload=None, cfg: dict | None = No
     return obj.get("data")
 
 
+def ensure_material_category(category: str, cfg: dict) -> bool:
+    """把分类注册到「分类管理」名单；名单和素材上的分类值是两套数据。
+
+    返回 True 表示本次新增，False 表示原本已存在或分类为空。
+    """
+    category = (category or "").strip()
+    if not category:
+        return False
+    cats = request_json("GET", "/api/materials/categories", None, cfg) or []
+    cats = [str(c).strip() for c in cats if str(c).strip()]
+    if category in cats:
+        return False
+    cats.append(category)
+    request_json("POST", "/api/materials/categories", {"categories": cats}, cfg)
+    print(f"  分类已注册到分类管理: {category}")
+    return True
+
+
 def upload_multipart(endpoint: str, filename: str, content_type: str, content, cfg: dict):
     """流式 multipart 上传，content 可以是 bytes 或本地文件路径。"""
     scheme, host, port = parse_base(cfg["base_url"])
@@ -563,6 +581,8 @@ def process_item(item: Path, cfg: dict, dest_ok: Path, dest_fail: Path,
         final_category = (category or "").strip() or meta.get("category", "")
         if final_category:
             try:
+                # 先注册到分类名单，否则素材虽有分类值，网页“全部分类/分类管理”看不到
+                ensure_material_category(final_category, cfg)
                 request_json(
                     "POST",
                     f"/api/materials/{video_data.get('id')}/category",

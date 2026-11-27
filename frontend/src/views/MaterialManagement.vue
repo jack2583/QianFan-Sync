@@ -250,11 +250,14 @@
       append-to-body
     >
       <div class="category-manager">
-        <p class="category-manager-hint">自定义分类后，可在素材管理页和发布页素材选择弹窗中按分类筛选。</p>
+        <p class="category-manager-hint">自定义分类后，可在素材管理页和发布页素材选择弹窗中按分类筛选。重命名会同步更新所有使用该分类的素材，点「保存」后生效。</p>
         <div class="category-list">
           <div v-for="(c, i) in categoryDraft" :key="c" class="category-row">
             <span>{{ c }}</span>
-            <el-button size="small" text type="danger" @click="removeCategoryDraft(i)">删除</el-button>
+            <span class="category-row-actions">
+              <el-button size="small" text type="primary" @click="renameCategoryDraft(i)">重命名</el-button>
+              <el-button size="small" text type="danger" @click="removeCategoryDraft(i)">删除</el-button>
+            </span>
           </div>
           <div v-if="categoryDraft.length === 0" class="category-empty">暂无分类</div>
         </div>
@@ -399,8 +402,11 @@ async function cycleCategory(mat) {
 // 分类管理对话框
 const categoryDialogVisible = ref(false)
 const categoryDraft = ref([])
+// 本次编辑里的重命名映射，保存时随分类名单一起提交，由后端在同一次事务内同步素材分类。
+const categoryRenames = ref([])
 function openCategoryManager() {
   categoryDraft.value = [...categories.value]
+  categoryRenames.value = []
   categoryDialogVisible.value = true
 }
 function addCategoryDraft() {
@@ -421,17 +427,46 @@ function addCategoryDraft() {
 function removeCategoryDraft(index) {
   categoryDraft.value.splice(index, 1)
 }
+function renameCategoryDraft(index) {
+  const oldName = categoryDraft.value[index]
+  ElMessageBox.prompt('输入新的分类名称', '重命名分类', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    inputValue: oldName,
+    inputPlaceholder: '输入新名称',
+  }).then(({ value }) => {
+    const newName = (value || '').trim()
+    if (!newName) {
+      ElMessage.warning('分类名不能为空')
+      return
+    }
+    if (newName === oldName) return
+    if (categoryDraft.value.includes(newName)) {
+      ElMessage.warning('分类已存在')
+      return
+    }
+    categoryDraft.value[index] = newName
+    // 按顺序记录映射，后端会依次应用（支持连续重命名同一分类）。
+    categoryRenames.value.push({ old: oldName, new: newName })
+  }).catch(() => {})
+}
 async function saveCategoryManager() {
   try {
-    const resp = await materialsApi.saveCategories(categoryDraft.value)
+    const resp = await materialsApi.saveCategories(categoryDraft.value, categoryRenames.value)
     if (resp.code === 200) {
       categories.value = resp.data || []
-      // 若当前筛选的分类被删掉，重置筛选
-      if (categoryFilter.value && !categories.value.includes(categoryFilter.value)) {
+      // 当前筛选若命中被重命名的分类，跟随到新名；若被删除则重置
+      const renamed = categoryRenames.value.find((r) => r.old === categoryFilter.value)
+      if (renamed) {
+        categoryFilter.value = renamed.new
+      } else if (categoryFilter.value && !categories.value.includes(categoryFilter.value)) {
         categoryFilter.value = ''
       }
       categoryDialogVisible.value = false
-      ElMessage.success('分类已保存')
+      const parts = []
+      if (resp.synced) parts.push(`同步 ${resp.synced} 个素材`)
+      if (resp.cleared) parts.push(`清理 ${resp.cleared} 个失效分类`)
+      ElMessage.success('分类已保存' + (parts.length ? `（${parts.join('，')}）` : ''))
       loadPage()
     }
   } catch (e) {
@@ -1136,6 +1171,11 @@ $danger: #ef4444;
   background: $bg-base;
   font-size: 13px;
   color: $text-1;
+}
+.category-row-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
 }
 .category-empty {
   padding: 18px;

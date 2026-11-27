@@ -374,12 +374,16 @@ def cmd_prepare(args) -> int:
         videos = videos[: args.limit]
 
     args.cover_time = parse_time_arg(args.cover_time)
-    rows = [prepare_one(v, args, index, used) for v in videos]
-
-    if not args.dry_run:
-        save_index(index)
     report_path = TOOLS / ("prepare_report.dryrun.csv" if args.dry_run else "prepare_report.csv")
-    write_report(rows, report_path)
+    rows: list[dict] = []
+
+    # 逐个落盘：中途中断也不会丢掉已经处理好的视频索引
+    for v in videos:
+        row = prepare_one(v, args, index, used)
+        rows.append(row)
+        if not args.dry_run:
+            save_index(index)
+            write_report(rows, report_path)
 
     for row in rows:
         print(f"[{row['status']}] {row['id']}  {row['source']}  ->  {row['title']}")
