@@ -435,6 +435,9 @@ def build_draft_data(meta: dict, video_data: dict, cover_data: dict, cfg: dict) 
         "size": video_data.get("file_size"),
         "type": video_data.get("mime_type"),
         "duration": video_data.get("duration") or 0,
+        "orientation": video_data.get("orientation", ""),
+        "thumbnail_path": video_data.get("thumbnail_path", ""),
+        "thumbnail_url": video_data.get("thumbnail_url", ""),
     }
     common = {
         "videoLandscape": video_obj,
@@ -445,12 +448,20 @@ def build_draft_data(meta: dict, video_data: dict, cover_data: dict, cfg: dict) 
         "coverPortrait916": cover_data.get("coverPortrait916"),
     }
 
-    platforms = cfg.get("platforms") or ["douyin"]
+    # 描述为空时回退到标题，避免发布页描述栏空白；后续可用 run.bat review 改写
+    description = (meta.get("description") or "").strip() or meta["title"]
+
+    # 配置里只写了 douyin，但发布页还要能切到视频号等平台。
+    # 把 channels 一起写进草稿，否则发布页走平台默认值「无需标注」，描述也为空。
+    platforms = list(cfg.get("platforms") or ["douyin"])
+    if "channels" not in platforms:
+        platforms.append("channels")
+
     platform_configs = {}
     for platform in platforms:
         pc = {
             "title": meta["title"],
-            "description": meta["description"],
+            "description": description,
             "tags": meta["tags"],
             "aiContent": meta["aiContent"],
             "isOriginal": meta["isOriginal"],
@@ -466,6 +477,23 @@ def build_draft_data(meta: dict, video_data: dict, cover_data: dict, cfg: dict) 
                 "tagValue": "",
                 "mixId": "",
                 "mixData": "",
+            })
+        elif platform == "channels":
+            pc.update({
+                "channelsCollectionName": "",
+                "channelsCollectionData": None,
+                "channelsLocationName": "",
+                "channelsLocationData": None,
+                "channelsActivityName": "",
+                "channelsActivityData": None,
+                "channelsMarkTag": "含AI生成内容",
+                "channelsShootDate": "",
+                "channelsShootRegion": [],
+                "channelsRepostSource": "",
+                "channelsDrama": [],
+                "channelsLinkType": "",
+                "channelsLinkArticleUrl": "",
+                "channelsRedEnvelopeUrl": "",
             })
         platform_configs[platform] = pc
 
